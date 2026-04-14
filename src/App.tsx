@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  ApiError,
   createProduct,
   deleteProduct,
   fetchCategories,
   fetchProductCounts,
   fetchProducts,
+  login,
   updateProduct,
+  type AuthLoginSession,
   type ApiProductsPage,
   type ApiProduct,
   type BasicAuthCredentials,
@@ -54,8 +57,106 @@ const isValidHttpUrl = (value: string): boolean => {
   }
 }
 
+const parsePortFromUrl = (value: string): string | null => {
+  try {
+    const parsed = new URL(value)
+    if (parsed.port && parsed.port.trim() !== '') {
+      return parsed.port
+    }
+
+    if (parsed.protocol === 'http:') {
+      return '80'
+    }
+
+    if (parsed.protocol === 'https:') {
+      return '443'
+    }
+
+    return null
+  } catch {
+    return null
+  }
+}
+
+type RuntimeBackendTarget = {
+  label: string
+  port: string | null
+  targetUrl: string
+}
+
+const resolveRuntimeBackendTarget = (): RuntimeBackendTarget => {
+  const directApiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').trim()
+  if (directApiBaseUrl !== '') {
+    return {
+      label: `direct ${directApiBaseUrl}`,
+      port: parsePortFromUrl(directApiBaseUrl),
+      targetUrl: directApiBaseUrl,
+    }
+  }
+
+  const proxiedBackendUrl = (import.meta.env.VITE_BACKEND_URL ?? '').trim()
+  if (proxiedBackendUrl !== '') {
+    return {
+      label: `proxy ${proxiedBackendUrl}`,
+      port: parsePortFromUrl(proxiedBackendUrl),
+      targetUrl: proxiedBackendUrl,
+    }
+  }
+
+  return {
+    label: 'proxy http://localhost:8080 (config default)',
+    port: '8080',
+    targetUrl: 'http://localhost:8080',
+  }
+}
+
+const writeTextToClipboard = async (value: string): Promise<boolean> => {
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value)
+    return true
+  }
+
+  if (typeof document === 'undefined') {
+    return false
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = value
+  textarea.setAttribute('readonly', 'true')
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+
+  const copied = document.execCommand('copy')
+  document.body.removeChild(textarea)
+  return copied
+}
+
 function App() {
   const queryClient = useQueryClient()
+
+  const runtimeBackendTarget = useMemo(() => resolveRuntimeBackendTarget(), [])
+  const runtimeBadgeClassName =
+    runtimeBackendTarget.port === '8081'
+      ? 'runtime-target-badge port-8081'
+      : runtimeBackendTarget.port === '8080'
+        ? 'runtime-target-badge port-8080'
+        : 'runtime-target-badge'
+
+  const handleCopyRuntimeTarget = useCallback(async (): Promise<void> => {
+    try {
+      const copied = await writeTextToClipboard(runtimeBackendTarget.targetUrl)
+      if (copied) {
+        setToastMessage(`Copied API target URL: ${runtimeBackendTarget.targetUrl}`)
+        return
+      }
+    } catch {
+      // Ignore and fall through to shared fallback message.
+    }
+
+    setToastMessage('Could not copy target URL. Clipboard access may be blocked in this browser.')
+  }, [runtimeBackendTarget.targetUrl])
 
   const [searchTerm, setSearchTerm] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('all')
@@ -69,9 +170,10 @@ function App() {
   const [lastRecoveredSnapshotToken, setLastRecoveredSnapshotToken] = useState<string | null>(null)
 
   const [credentials, setCredentials] = useState<BasicAuthCredentials>({
-    username: 'admin',
-    password: 'admin123',
+    username: '',
+    password: '',
   })
+  const [authSession, setAuthSession] = useState<AuthLoginSession | null>(null)
   const [formState, setFormState] = useState<ProductFormState>(emptyFormState)
   const [editingProductId, setEditingProductId] = useState<number | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
@@ -83,6 +185,23 @@ function App() {
     setCursorIndex(0)
     setSnapshotToken(null)
   }, [])
+
+  const ensureAccessToken = useCallback(async (): Promise<string> => {
+    const now = Date.now()
+    if (authSession && authSession.expiresAtEpochMs > now + 10_000) {
+      return authSession.accessToken
+    }
+
+    const username = credentials.username.trim()
+    const password = credentials.password.trim()
+    if (!username || !password) {
+      throw new Error('Admin username and password are required for write operations.')
+    }
+
+    const nextSession = await login({ username, password })
+    setAuthSession(nextSession)
+    return nextSession.accessToken
+  }, [authSession, credentials.password, credentials.username])
 
   const productsQueryKey = useMemo(
     () =>
@@ -207,7 +326,10 @@ function App() {
   }
 
   const createProductMutation = useMutation({
-    mutationFn: (newProduct: ProductWriteRequest) => createProduct(newProduct, credentials),
+    mutationFn: async (newProduct: ProductWriteRequest) => {
+      const accessToken = await ensureAccessToken()
+      return createProduct(newProduct, accessToken)
+    },
     onMutate: async (newProduct: ProductWriteRequest) => {
       await queryClient.cancelQueries({ queryKey: ['products'] })
 
@@ -246,9 +368,12 @@ function App() {
 
       return { previousPage }
     },
-    onError: (_error, _variables, context) => {
+    onError: (mutationError, _variables, context) => {
       if (context?.previousPage) {
         queryClient.setQueryData(productsQueryKey, context.previousPage)
+      }
+      if (mutationError instanceof ApiError && mutationError.status === 401) {
+        setAuthSession(null)
       }
     },
     onSuccess: () => {
@@ -266,8 +391,10 @@ function App() {
   })
 
   const updateProductMutation = useMutation({
-    mutationFn: ({ id, product }: { id: number; product: ProductWriteRequest }) =>
-      updateProduct(id, product, credentials),
+    mutationFn: async ({ id, product }: { id: number; product: ProductWriteRequest }) => {
+      const accessToken = await ensureAccessToken()
+      return updateProduct(id, product, accessToken)
+    },
     onMutate: async ({ id, product }: { id: number; product: ProductWriteRequest }) => {
       await queryClient.cancelQueries({ queryKey: ['products'] })
 
@@ -314,9 +441,12 @@ function App() {
 
       return { previousPage }
     },
-    onError: (_error, _variables, context) => {
+    onError: (mutationError, _variables, context) => {
       if (context?.previousPage) {
         queryClient.setQueryData(productsQueryKey, context.previousPage)
+      }
+      if (mutationError instanceof ApiError && mutationError.status === 401) {
+        setAuthSession(null)
       }
     },
     onSuccess: () => {
@@ -335,7 +465,10 @@ function App() {
   })
 
   const deleteProductMutation = useMutation({
-    mutationFn: (id: number) => deleteProduct(id, credentials),
+    mutationFn: async (id: number) => {
+      const accessToken = await ensureAccessToken()
+      return deleteProduct(id, accessToken)
+    },
     onMutate: async (id: number) => {
       await queryClient.cancelQueries({ queryKey: ['products'] })
 
@@ -350,9 +483,12 @@ function App() {
 
       return { previousPage }
     },
-    onError: (_error, _variables, context) => {
+    onError: (mutationError, _variables, context) => {
       if (context?.previousPage) {
         queryClient.setQueryData(productsQueryKey, context.previousPage)
+      }
+      if (mutationError instanceof ApiError && mutationError.status === 401) {
+        setAuthSession(null)
       }
     },
     onSettled: async () => {
@@ -557,7 +693,20 @@ function App() {
   return (
     <main className="catalog-page">
       <header className="catalog-header">
-        <p className="eyebrow">Portfolio Build</p>
+        <div className="header-top-row">
+          <p className="eyebrow">Portfolio Build</p>
+          <button
+            type="button"
+            className={runtimeBadgeClassName}
+            aria-label="Copy active frontend backend target URL"
+            title={`Copy active target URL: ${runtimeBackendTarget.targetUrl}`}
+            onClick={() => {
+              void handleCopyRuntimeTarget()
+            }}
+          >
+            API target: {runtimeBackendTarget.port ?? 'custom'} ({runtimeBackendTarget.label})
+          </button>
+        </div>
         <h1>Spring + React Product Catalog</h1>
         <p className="subtitle">
           This page uses cursor pagination and sortable server-side filters from <code>/api/products/cursor</code>.
@@ -680,7 +829,8 @@ function App() {
         <h2>{editingProductId === null ? 'Create Product' : `Update Product #${editingProductId}`}</h2>
 
         <p className="admin-note">
-          Write endpoints use Spring Basic Auth. Default local admin is <code>admin/admin123</code>.
+          Write endpoints now use token-based auth. Provide admin credentials and the app requests a short-lived
+          access token for create, update, and delete operations.
         </p>
 
         <form className="product-form" onSubmit={handleSubmit}>
@@ -689,6 +839,8 @@ function App() {
               Admin username
               <input
                 type="text"
+                autoComplete="username"
+                placeholder="Enter admin username"
                 value={credentials.username}
                 onChange={(event) => {
                   setCredentials((current) => ({
@@ -703,6 +855,8 @@ function App() {
               Admin password
               <input
                 type="password"
+                autoComplete="current-password"
+                placeholder="Enter admin password"
                 value={credentials.password}
                 onChange={(event) => {
                   setCredentials((current) => ({
@@ -867,7 +1021,7 @@ function App() {
         <section className="error-card">
           <h2>Could not load products</h2>
           <p>{error instanceof Error ? error.message : 'Unexpected API error'}</p>
-          <p>Make sure Spring Boot is running on port 8080 and try again.</p>
+          <p>Make sure Spring Boot is running for target {runtimeBackendTarget.targetUrl} and try again.</p>
         </section>
       )}
 

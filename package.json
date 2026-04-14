@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:8080": "vite --mode backend8080",
+    "dev:8081": "vite --mode backend8081",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",

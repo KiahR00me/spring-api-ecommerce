@@ -12,10 +12,11 @@ This frontend consumes the Spring Boot backend from the `java-ecommerce` folder 
 6. Snapshot token expiry/version validation for stricter production semantics.
 7. Sortable server-side columns (`sortBy=NEWEST|PRICE|NAME`, `sortDirection=ASC|DESC`).
 8. Cached count endpoint (`/api/products/counts`) for fast total/active/inactive badge rendering.
-9. Product create/update/delete from React using Spring Basic Auth.
+9. Product create/update/delete from React using login-issued bearer tokens.
 10. Optimistic CRUD updates for instant UX while mutation requests run.
 11. Image URL support with preview in the form and product cards.
-12. Vite dev proxy from `/api/*` to Spring Boot (`http://localhost:8080` by default).
+12. Vite dev proxy from `/api/*` to Spring Boot (default is `http://localhost:8081` in development).
+13. Runtime header badge showing active frontend API target (port 8080 vs 8081), click to copy full target URL.
 
 ## Run the backend
 
@@ -72,6 +73,19 @@ bun install
 bun run dev
 ```
 
+`bun run dev` uses the default development proxy target from `.env.development`:
+
+```text
+http://localhost:8081
+```
+
+Use explicit profile scripts when you want to switch backend targets quickly:
+
+```powershell
+bun run dev:8080
+bun run dev:8081
+```
+
 If you prefer pnpm:
 
 ```powershell
@@ -85,38 +99,13 @@ Frontend URL:
 http://localhost:5173
 ```
 
-## Seed local dev data (dev-fast profile)
+## Local data behavior (dev-fast profile)
 
-The default backend profile uses H2 with Flyway disabled, so the product list may start empty.
+The backend now auto-seeds demo categories/products in `dev-fast` when catalog tables are empty.
+The feature is controlled by:
 
-Use this PowerShell script to create a category and two products via secured Spring endpoints:
-
-```powershell
-$pair = "admin:admin123"
-$token = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($pair))
-$headers = @{ Authorization = "Basic $token" }
-
-$category = Invoke-RestMethod -Method Post -Uri "http://localhost:8080/api/categories" -Headers $headers -ContentType "application/json" -Body '{"name":"Electronics","description":"Portfolio demo category"}'
-
-Invoke-RestMethod -Method Post -Uri "http://localhost:8080/api/products" -Headers $headers -ContentType "application/json" -Body (@{
-	name = "Mechanical Keyboard Pro"
-	description = "Hot-swappable keyboard for developers"
-	imageUrl = "https://images.unsplash.com/photo-1511467687858-23d96c32e4ae?auto=format&fit=crop&w=1200&q=80"
-	price = 129.00
-	stockQuantity = 120
-	categoryId = $category.id
-	active = $true
-} | ConvertTo-Json)
-
-Invoke-RestMethod -Method Post -Uri "http://localhost:8080/api/products" -Headers $headers -ContentType "application/json" -Body (@{
-	name = "UltraWide 34 Monitor"
-	description = "3440x1440 monitor for productivity"
-	imageUrl = "https://images.unsplash.com/photo-1527443224154-c4a3942d3acf?auto=format&fit=crop&w=1200&q=80"
-	price = 649.00
-	stockQuantity = 35
-	categoryId = $category.id
-	active = $true
-} | ConvertTo-Json)
+```text
+app.seed.dev-fast.enabled=true
 ```
 
 ## Optional environment variables
@@ -124,7 +113,10 @@ Invoke-RestMethod -Method Post -Uri "http://localhost:8080/api/products" -Header
 `VITE_BACKEND_URL`
 
 - Used by Vite proxy in development.
-- Default: `http://localhost:8080`
+- Default for `bun run dev`: `http://localhost:8081` (from `.env.development`).
+- Override with profile scripts:
+	- `bun run dev:8080` -> `.env.backend8080`
+	- `bun run dev:8081` -> `.env.backend8081`
 
 `VITE_API_BASE_URL`
 

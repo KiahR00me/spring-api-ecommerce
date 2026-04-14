@@ -20,6 +20,13 @@ export type BasicAuthCredentials = {
   password: string
 }
 
+export type AuthLoginSession = {
+  accessToken: string
+  tokenType: string
+  expiresInSeconds: number
+  expiresAtEpochMs: number
+}
+
 export type ProductWriteRequest = {
   name: string
   description: string | null
@@ -84,6 +91,7 @@ const apiBaseUrl = trimTrailingSlash(import.meta.env.VITE_API_BASE_URL ?? '')
 const productsEndpoint = `${apiBaseUrl}/api/products`
 const productsCursorEndpoint = `${productsEndpoint}/cursor`
 const categoriesEndpoint = `${apiBaseUrl}/api/categories`
+const authLoginEndpoint = `${apiBaseUrl}/api/auth/login`
 
 const toNumber = (value: number | string): number =>
   typeof value === 'number' ? value : Number.parseFloat(value)
@@ -112,10 +120,7 @@ const mapProduct = (item: Omit<ApiProduct, 'price'> & { price: number | string }
   price: toNumber(item.price),
 })
 
-const getAuthHeader = (credentials: BasicAuthCredentials): string => {
-  const raw = `${credentials.username}:${credentials.password}`
-  return `Basic ${btoa(raw)}`
-}
+const getBearerHeader = (accessToken: string): string => `Bearer ${accessToken}`
 
 const buildQueryString = (params: ProductQueryParams): string => {
   const query = new URLSearchParams()
@@ -228,16 +233,33 @@ export const fetchCategories = async (): Promise<ApiCategory[]> => {
   return (await response.json()) as ApiCategory[]
 }
 
+export const login = async (credentials: BasicAuthCredentials): Promise<AuthLoginSession> => {
+  const response = await fetch(authLoginEndpoint, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(credentials),
+  })
+
+  if (!response.ok) {
+    throw await parseError(response)
+  }
+
+  return (await response.json()) as AuthLoginSession
+}
+
 export const createProduct = async (
   product: ProductWriteRequest,
-  credentials: BasicAuthCredentials,
+  accessToken: string,
 ): Promise<ApiProduct> => {
   const response = await fetch(productsEndpoint, {
     method: 'POST',
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json',
-      Authorization: getAuthHeader(credentials),
+      Authorization: getBearerHeader(accessToken),
     },
     body: JSON.stringify(product),
   })
@@ -254,14 +276,14 @@ export const createProduct = async (
 export const updateProduct = async (
   id: number,
   product: ProductWriteRequest,
-  credentials: BasicAuthCredentials,
+  accessToken: string,
 ): Promise<ApiProduct> => {
   const response = await fetch(`${productsEndpoint}/${id}`, {
     method: 'PUT',
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json',
-      Authorization: getAuthHeader(credentials),
+      Authorization: getBearerHeader(accessToken),
     },
     body: JSON.stringify(product),
   })
@@ -277,12 +299,12 @@ export const updateProduct = async (
 
 export const deleteProduct = async (
   id: number,
-  credentials: BasicAuthCredentials,
+  accessToken: string,
 ): Promise<void> => {
   const response = await fetch(`${productsEndpoint}/${id}`, {
     method: 'DELETE',
     headers: {
-      Authorization: getAuthHeader(credentials),
+      Authorization: getBearerHeader(accessToken),
     },
   })
 
