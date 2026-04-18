@@ -99,6 +99,59 @@ Frontend URL:
 http://localhost:5173
 ```
 
+## One-command local smoke launcher
+
+From the workspace root (`JAVA`), run:
+
+```powershell
+./java-ecommerce/scripts/run-e2e-smoke-stack.ps1
+```
+
+What it does automatically:
+
+1. Starts Spring Boot backend on `http://localhost:8081`
+2. Starts Vite frontend on `http://localhost:5173`
+3. Runs the auth + product CRUD smoke flow through the frontend proxy
+4. Shuts down both backend and frontend processes
+
+Optional useful flags:
+
+1. `-SkipFrontendInstall` (skip `npm ci` check path if `node_modules` already exists)
+2. `-BackendPort <port>` and `-FrontendPort <port>`
+3. `-StartupTimeoutSeconds <seconds>`
+4. `-AdminCredential <PSCredential>`
+
+## End-to-end smoke flow (auth + product CRUD)
+
+With backend and frontend running together, execute the reusable smoke script from `java-ecommerce`:
+
+```powershell
+../java-ecommerce/scripts/smoke-react-spring-flow.ps1 -FrontendBaseUrl http://localhost:5173
+```
+
+What this validates through the frontend proxy:
+
+1. Login (`POST /api/auth/login`)
+2. Product listing (`GET /api/products/cursor`)
+3. Product create (`POST /api/products`)
+4. Product update (`PUT /api/products/{id}`)
+5. Product delete (`DELETE /api/products/{id}`)
+
+Credentials are resolved in this order:
+
+1. Script parameter `-AdminCredential`
+2. Environment variables `APP_SECURITY_ADMIN_USERNAME` and `APP_SECURITY_ADMIN_PASSWORD`
+
+If neither source is available, the script fails fast with a clear setup message.
+
+## CI smoke job
+
+The repository now includes a push-triggered GitHub Actions workflow:
+
+1. Workflow file: `.github/workflows/e2e-smoke.yml`
+2. Trigger: every push (plus manual `workflow_dispatch`)
+3. Behavior: installs dependencies, runs the same integrated launcher script, and fails the pipeline if smoke checks fail
+
 ## Local data behavior (dev-fast profile)
 
 The backend now auto-seeds demo categories/products in `dev-fast` when catalog tables are empty.

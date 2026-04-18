@@ -1,0 +1,65 @@
+name: E2E Smoke
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    name: Full-stack smoke flow
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout frontend
+        uses: actions/checkout@v4
+
+      - name: Checkout backend
+        uses: actions/checkout@v4
+        with:
+          repository: KiahR00me/java-ecommerce
+          path: java-ecommerce
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run integrated smoke launcher
+        shell: pwsh
+        env:
+          APP_SECURITY_ADMIN_USERNAME: admin
+          APP_SECURITY_ADMIN_PASSWORD: change-me-admin
+          APP_SECURITY_CUSTOMER_USERNAME: customer@example.com
+          APP_SECURITY_CUSTOMER_PASSWORD: change-me-customer
+          APP_SECURITY_JWT_SECRET: ci-smoke-jwt-secret-32-characters-minimum
+          APP_SECURITY_JWT_TTL_SECONDS: '900'
+        run: |
+          ./java-ecommerce/scripts/run-e2e-smoke-stack.ps1 `
+            -BackendDir (Resolve-Path ./java-ecommerce).Path `
+            -FrontendDir (Get-Location).Path `
+            -SkipFrontendInstall
+
+      - name: Upload smoke logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-logs
+          path: |
+            java-ecommerce/build/smoke-backend.out.log
+            java-ecommerce/build/smoke-backend.err.log
+            smoke-frontend.out.log
+            smoke-frontend.err.log
+          if-no-files-found: ignore

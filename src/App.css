@@ -137,6 +137,12 @@
   color: var(--text-heading);
 }
 
+.control-hint {
+  font-size: 0.76rem;
+  color: #3f5f72;
+  font-family: var(--mono);
+}
+
 .control-group input,
 .control-group select,
 .product-form input,

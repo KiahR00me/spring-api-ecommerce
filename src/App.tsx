@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ApiError,
@@ -144,6 +144,21 @@ function App() {
         ? 'runtime-target-badge port-8080'
         : 'runtime-target-badge'
 
+  const [searchTerm, setSearchTerm] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('all')
+  const [pageSize, setPageSize] = useState(8)
+  const [sortBy, setSortBy] = useState<SortBy>('NEWEST')
+  const [sortDirection, setSortDirection] = useState<SortDirection>('DESC')
+  const [cursorTrail, setCursorTrail] = useState<Array<string | null>>([null])
+  const [cursorIndex, setCursorIndex] = useState(0)
+  const [snapshotToken, setSnapshotToken] = useState<string | null>(null)
+  const [toastMessage, setToastMessage] = useState<string | null>(null)
+  const [lastRecoveredSnapshotToken, setLastRecoveredSnapshotToken] = useState<string | null>(null)
+  const deferredSearchTerm = useDeferredValue(searchTerm)
+  const normalizedSearchTerm = deferredSearchTerm.trim()
+  const normalizedSearchKeyword = normalizedSearchTerm.toLowerCase()
+  const isSearchSyncing = searchTerm.trim() !== normalizedSearchTerm
+
   const handleCopyRuntimeTarget = useCallback(async (): Promise<void> => {
     try {
       const copied = await writeTextToClipboard(runtimeBackendTarget.targetUrl)
@@ -157,17 +172,6 @@ function App() {
 
     setToastMessage('Could not copy target URL. Clipboard access may be blocked in this browser.')
   }, [runtimeBackendTarget.targetUrl])
-
-  const [searchTerm, setSearchTerm] = useState('')
-  const [categoryFilter, setCategoryFilter] = useState('all')
-  const [pageSize, setPageSize] = useState(8)
-  const [sortBy, setSortBy] = useState<SortBy>('NEWEST')
-  const [sortDirection, setSortDirection] = useState<SortDirection>('DESC')
-  const [cursorTrail, setCursorTrail] = useState<Array<string | null>>([null])
-  const [cursorIndex, setCursorIndex] = useState(0)
-  const [snapshotToken, setSnapshotToken] = useState<string | null>(null)
-  const [toastMessage, setToastMessage] = useState<string | null>(null)
-  const [lastRecoveredSnapshotToken, setLastRecoveredSnapshotToken] = useState<string | null>(null)
 
   const [credentials, setCredentials] = useState<BasicAuthCredentials>({
     username: '',
@@ -208,7 +212,7 @@ function App() {
       [
         'products',
         {
-          search: searchTerm.trim(),
+          search: normalizedSearchTerm,
           categoryId: categoryFilter === 'all' ? null : Number(categoryFilter),
           cursor: currentCursor,
           snapshot: snapshotToken,
@@ -217,7 +221,7 @@ function App() {
           sortDirection,
         },
       ] as const,
-    [searchTerm, categoryFilter, currentCursor, snapshotToken, pageSize, sortBy, sortDirection],
+    [normalizedSearchTerm, categoryFilter, currentCursor, snapshotToken, pageSize, sortBy, sortDirection],
   )
 
   const {
@@ -260,7 +264,7 @@ function App() {
     queryKey: [
       'product-counts',
       {
-        search: searchTerm.trim(),
+        search: normalizedSearchTerm,
         categoryId: categoryFilter === 'all' ? null : Number(categoryFilter),
       },
     ],
@@ -314,15 +318,14 @@ function App() {
       return false
     }
 
-    const keyword = searchTerm.trim().toLowerCase()
-    if (keyword === '') {
+    if (normalizedSearchKeyword === '') {
       return true
     }
 
     const searchableText = `${product.name} ${product.description ?? ''} ${product.category.name}`
       .toLowerCase()
 
-    return searchableText.includes(keyword)
+    return searchableText.includes(normalizedSearchKeyword)
   }
 
   const createProductMutation = useMutation({
@@ -499,19 +502,28 @@ function App() {
   })
 
   const productCountLabel = useMemo(() => {
+    if (isSearchSyncing) {
+      return 'Updating search results...'
+    }
+
     if (!productsPage) {
       return 'Loading products...'
     }
 
     return `Cursor page ${cursorIndex + 1} • ${productsPage.items.length} item(s) • sorted by ${sortBy.toLowerCase()}`
-  }, [productsPage, cursorIndex, sortBy])
+  }, [productsPage, cursorIndex, sortBy, isSearchSyncing])
 
-  const formatPrice = (price: number): string =>
-    new Intl.NumberFormat('en-US', {
+  const priceFormatter = useMemo(
+    () =>
+      new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
       maximumFractionDigits: 2,
-    }).format(price)
+      }),
+    [],
+  )
+
+  const formatPrice = (price: number): string => priceFormatter.format(price)
 
   const getStockLabel = (product: ApiProduct): string => {
     if (product.stockQuantity <= 10) {
@@ -752,6 +764,7 @@ function App() {
               resetCursorNavigation()
             }}
           />
+          {isSearchSyncing && <small className="control-hint">Updating search results...</small>}
         </div>
 
         <div className="control-group">
