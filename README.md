@@ -15,7 +15,7 @@ This frontend consumes the Spring Boot backend from the `java-ecommerce` folder 
 9. Product create/update/delete from React using login-issued bearer tokens.
 10. Optimistic CRUD updates for instant UX while mutation requests run.
 11. Image URL support with preview in the form and product cards.
-12. Vite dev proxy from `/api/*` to Spring Boot (default is `http://localhost:8081` in development).
+12. Vite dev proxy from `/api/*` to Spring Boot (default is `http://localhost:8080` in development).
 13. Runtime header badge showing active frontend API target (port 8080 vs 8081), click to copy full target URL.
 
 ## Run the backend
@@ -24,6 +24,18 @@ From `java-ecommerce`:
 
 ```powershell
 ./gradlew bootRun
+```
+
+Isolated backend mode for `bun run dev:8081`:
+
+```powershell
+./scripts/start-backend-8081.ps1
+```
+
+Equivalent direct command:
+
+```powershell
+./gradlew bootRun --args="--server.port=8081 --spring.profiles.active=dev-fast"
 ```
 
 Backend API URL:
@@ -76,7 +88,7 @@ bun run dev
 `bun run dev` uses the default development proxy target from `.env.development`:
 
 ```text
-http://localhost:8081
+http://localhost:8080
 ```
 
 Use explicit profile scripts when you want to switch backend targets quickly:
@@ -85,6 +97,8 @@ Use explicit profile scripts when you want to switch backend targets quickly:
 bun run dev:8080
 bun run dev:8081
 ```
+
+When running `bun run dev:8081`, make sure backend is started on port `8081` using one of the commands above.
 
 If you prefer pnpm:
 
@@ -166,7 +180,7 @@ app.seed.dev-fast.enabled=true
 `VITE_BACKEND_URL`
 
 - Used by Vite proxy in development.
-- Default for `bun run dev`: `http://localhost:8081` (from `.env.development`).
+- Default for `bun run dev`: `http://localhost:8080` (from `.env.development`).
 - Override with profile scripts:
 	- `bun run dev:8080` -> `.env.backend8080`
 	- `bun run dev:8081` -> `.env.backend8081`
